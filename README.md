@@ -96,7 +96,7 @@
   - Filter topics with regexp for current groups
   - Ldap configuration to match AKHQ groups/roles
   - Filter consumer groups with regexp for current groups
-  
+
 ## New React UI
 
 Since this is a major rework, the new UI can have some issues, so please [report any issue](https://github.com/tchiotludo/akhq/issues), thanks!
@@ -291,10 +291,10 @@ These parameters are the default values used in the topic creation page.
 * `akhq.topic-data.size`: max record per page (default: 50)
 * `akhq.topic-data.poll-timeout`: The time, in milliseconds, spent waiting in poll if data is not available in the buffer (default: 1000).
 
-#### Ui Settings 
+#### Ui Settings
 ##### Topics
 * `akhq.ui-options.topic.default-view` is default list view (ALL, HIDE_INTERNAL, HIDE_INTERNAL_STREAM, HIDE_STREAM) (default: HIDE_INTERNAL)
-* `akhq.ui-options.topic.skip-consumer-groups` hide consumer groups columns on topic list 
+* `akhq.ui-options.topic.skip-consumer-groups` hide consumer groups columns on topic list
 * `akhq.ui-options.topic.skip-last-record` hide the last records on topic list
 
 ##### Topic Data
@@ -303,12 +303,12 @@ These parameters are the default values used in the topic creation page.
 
 #### Protobuf deserialization
 
-To deserialize topics containing data in Protobuf format, you can set topics mapping: 
+To deserialize topics containing data in Protobuf format, you can set topics mapping:
 for each `topic-regex` you can specify `descriptor-file-base64` (descriptor file encoded to Base64 format),
-or you can put descriptor files in `descriptors-folder` and specify `descriptor-file` name, 
-also specify corresponding message types for keys and values. 
-If, for example, keys are not in Protobuf format, `key-message-type` can be omitted, 
-the same for `value-message-type`. 
+or you can put descriptor files in `descriptors-folder` and specify `descriptor-file` name,
+also specify corresponding message types for keys and values.
+If, for example, keys are not in Protobuf format, `key-message-type` can be omitted,
+the same for `value-message-type`.
 This configuration can be specified for each Kafka cluster.
 
 Example configuration can look like as follows:
@@ -415,6 +415,8 @@ Define groups with specific roles for your users
     * `attributes.connects-filter-regexp`: Regexp list to filter Connect tasks available for current group
     * `attributes.consumer-groups-filter-regexp`: Regexp list to filter Consumer Groups available for current group
 
+:warning: `topics-filter-regexp`, `connects-filter-regexp` and `consumer-groups-filter-regexp` are only used when listing resources.
+If you have `topics/create` or `connect/create` roles and you try to create a resource that doesn't follow the regexp, that resource **WILL** be created.
 
 3 defaults group are available :
 - `admin` with all right
@@ -444,11 +446,11 @@ akhq.security:
     - username: admin
       password: "$2a$<hashed password>"
       passwordHash: BCRYPT
-      groups: 
+      groups:
       - admin
     - username: reader
       password: "<SHA-256 hashed password>"
-      groups: 
+      groups:
       - reader
 ```
 
@@ -502,7 +504,7 @@ micronaut:
           base: "OU=GroupsOU,dc=example,dc=com"
           filter: "member={0}"
 ```
-Replace 
+Replace
 ```yaml
 attributes:
   - "cn"
@@ -528,9 +530,9 @@ akhq:
           topics-filter-regexp:
             - "^projectA_topic$" # Individual topic
             - "^projectB_.*$" # Topic group
-          connects-filter-regexp: 
+          connects-filter-regexp:
             - "^test.*$"
-          consumer-groups-filter-regexp: 
+          consumer-groups-filter-regexp:
             - "consumer.*"
       topic-writer:
         name: topic-writer # Group name
@@ -540,7 +542,7 @@ akhq:
           - topic/delete
           - topic/config/update
         attributes:
-          topics-filter-regexp: 
+          topics-filter-regexp:
             - "test.*"
           connects-filter-regexp:
             - "^test.*$"
@@ -612,18 +614,164 @@ akhq:
 
 The username field can be any string field, the roles field has to be a JSON array.
 
+
+### Header configuration (reverse proxy)
+
+To enable Header authentication in the application, you'll have to configure the header that will resolve users & groups:
+
+```yaml
+akhq:
+  security:
+    # Header configuration (reverse proxy)
+    header-auth:
+      user-header: x-akhq-user # mandatory (the header name that will contain username)
+      groups-header: x-akhq-group # optional (the header name that will contain groups separated by groups-header-separator)
+      groups-header-separator: , # optional (separator, defaults to ',')
+      ip-patterns: [0.0.0.0] # optional (Java regular expressions for matching trusted IP addresses, '0.0.0.0' matches all addresses)
+      default-group: topic-reader
+      groups: # optional
+        # the name of the user group read from header
+        - name: header-admin-group
+          groups:
+            # the corresponding akhq groups (eg. topic-reader/writer or akhq default groups like admin/reader/no-role)
+            - admin
+      users: # optional
+        - username: header-user # username matching the `user-header` value
+          groups: # list of groups / additional groups
+            - topic-writer
+        - username: header-admin
+          groups:
+            - admin
+```
+
+* `user-header` is mandatory in order to map the user with `users` list or to display the user on the ui if no `users` is provided.
+* `groups-header` is optional and can be used in order to inject a list of groups for all the users. This list will be merged with `groups` for the current users.
+* `groups-header-separator` is optional and can be used to customize group separator used when parsing `groups-header` header, defaults to `,`.
+* `ip-patterns` limits the IP addresses that header authentication will accept, given as a list of Java regular expressions, omit or set to `[0.0.0.0]` to allow all addresses
+* `default-group` default AKHQ group, used when no groups were read from `groups-header`
+* `groups` maps external group names read from headers to AKHQ groups.
+* `users` assigns additional AKHQ groups to users.
+
+### External roles and attributes mapping
+
+If you managed which topics (or any other resource) in an external system, you have access to 2 more implementations mechanisms to map your authenticated user (from either Local, Header, LDAP or OIDC) into AKHQ roles and attributes:
+
+If you use this mechanism, keep in mind it will take the local user's groups for local Auth, and the external groups for Header/LDAP/OIDC (ie. this will NOT do the mapping between Header/LDAP/OIDC and local groups)
+
+**Default configuration-based**
+This is the current implementation and the default one (doesn't break compatibility)
+````yaml
+akhq:
+  security:
+    default-group: no-roles
+    groups:
+      reader:
+        roles:
+          - topic/read
+        attributes:
+          topics-filter-regexp: [".*"]
+      no-roles:
+        roles: []
+    ldap: # LDAP users/groups to AKHQ groups mapping
+    oidc: # OIDC users/groups to AKHQ groups mapping
+    header-auth: # header authentication users/groups to AKHQ groups mapping
+````
+
+**REST API**
+````yaml
+akhq:
+  security:
+    default-group: no-roles
+    rest:
+      enabled: true
+      url: https://external.service/get-roles-and-attributes
+    groups: # anything set here will not be used
+````
+
+In this mode, AKHQ will send to the ``akhq.security.rest.url`` endpoint a POST request with the following JSON :
+
+````json
+{
+  "providerType": "LDAP or OIDC or BASIC_AUTH or HEADER",
+  "providerName": "OIDC provider name (OIDC only)",
+  "username": "user",
+  "groups": ["LDAP-GROUP-1", "LDAP-GROUP-2", "LDAP-GROUP-3"]
+}
+````
+and expect the following JSON as response :
+````json
+{
+  "roles": ["topic/read", "topic/write", "..."],
+  "attributes":
+  {
+    "topics-filter-regexp": [".*"],
+    "connects-filter-regexp": [".*"],
+    "consumer-groups-filter-regexp": [".*"]
+  }
+}
+````
+
+**Groovy API**
+````yaml
+akhq:
+  security:
+    default-group: no-roles
+    groovy:
+      enabled: true
+      file: |
+        package org.akhq.utils;
+        class GroovyCustomClaimProvider implements ClaimProvider {
+            @Override
+            AKHQClaimResponse generateClaim(AKHQClaimRequest request) {
+                AKHQClaimResponse a = new AKHQClaimResponse();
+                a.roles = ["topic/read"]
+                a.attributes = [
+                        topicsFilterRegexp: [".*"],
+                        connectsFilterRegexp: [".*"],
+                        consumerGroupsFilterRegexp: [".*"]
+                ]
+                return a
+            }
+        }
+    groups: # anything set here will not be used
+````
+``akhq.security.groovy.file`` must be a groovy class that implements the interface ClaimProvider :
+````java
+package org.akhq.utils;
+public interface ClaimProvider {
+
+    AKHQClaimResponse generateClaim(AKHQClaimRequest request);
+
+    class AKHQClaimRequest{
+        ProviderType providerType;
+        String providerName;
+        String username;
+        List<String> groups;
+    }
+    class AKHQClaimResponse {
+        private List<String> roles;
+        private Map<String,Object> attributes;
+    }
+    enum ProviderType {
+        BASIC_AUTH,
+        LDAP,
+        OIDC
+    }
+}
+````
+
 ### Debugging authentication
 
-Debugging auth can be done by increasing log level on Micronaut that handle most of the authentication part : 
+Debugging auth can be done by increasing log level on Micronaut that handle most of the authentication part :
 ```bash
 curl -i -X POST -H "Content-Type: application/json" \
        -d '{ "configuredLevel": "TRACE" }' \
-       http://localhost:8081/loggers/io.micronaut.security
-       
-       
+       http://localhost:28081/loggers/io.micronaut.security
+
+
 curl -i -X POST -H "Content-Type: application/json" \
        -d '{ "configuredLevel": "TRACE" }' \
-       http://localhost:8081/loggers/org.akhq.configs
+       http://localhost:28081/loggers/org.akhq.configs
 ```
 
 ### Server
@@ -714,7 +862,7 @@ You can discover the api endpoint here :
 * `/swagger/akhq.yml`: a full [OpenApi](https://www.openapis.org/) specifications files
 
 ## Monitoring endpoint
-Several monitoring endpoint is enabled by default and available on port `8081` only.
+Several monitoring endpoint is enabled by default and available on port `28081` only.
 
 You can disable it, change the port or restrict access only for authenticated users following micronaut configuration below.
 
@@ -731,7 +879,7 @@ You can debug all query duration from AKHQ with this commands
 ```bash
 curl -i -X POST -H "Content-Type: application/json" \
        -d '{ "configuredLevel": "TRACE" }' \
-       http://localhost:8081/loggers/org.akhq
+       http://localhost:28081/loggers/org.akhq
 ```
 
 ## Development Environment
@@ -773,7 +921,7 @@ brief guide. For the following steps, please, make sure you meet these requireme
  * IntelliJ IDEA (Community Edition 2020.2) with the following plugins installed:
    * Gradle (bundled with IDEA)
    * [Lombok](https://plugins.jetbrains.com/plugin/6317-lombok)
- 
+
 First run a Kafka server locally. Therefore, you need to start Zookeeper first by opening a CMD and doing:
 ```bash
 $KAFKA_HOME\bin\windows\zookeeper-server-start.bat config\zookeper.properties
@@ -798,7 +946,7 @@ akhq:
     kafka:
       properties:
         bootstrap.servers: "localhost:9092"
-``` 
+```
 /!\ Do not commit this part of `application.yml`. A more secure way to configure your local development Kafka server is
 described in the Micronaut doc, chapter ["Application Configuration"](https://docs.micronaut.io/1.3.0.M1/guide/index.html#config).
 
